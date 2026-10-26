@@ -116,30 +116,42 @@ mtop() { command "$MYSQL_CLI" "${MYSQL_ARGS[@]}" --connect-timeout=5 -B -N -e "$
 # statement instead of mysqladmin's 100-character cut. Header line included (-B without -N).
 mplist() { command "$MYSQL_CLI" "${MYSQL_ARGS[@]}" --connect-timeout=5 -B -e "SHOW FULL PROCESSLIST"; }
 
-# Test if MySQL command requiring credentials succeeds
+# Determine .my.cnf location: current directory -> script directory -> home folder
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [ -f "./.my.cnf" ]; then
+  MY_CNF_FILE="./.my.cnf"
+elif [ -f "$SCRIPT_DIR/.my.cnf" ]; then
+  MY_CNF_FILE="$SCRIPT_DIR/.my.cnf"
+elif [ -f "$HOME/.my.cnf" ]; then
+  MY_CNF_FILE="$HOME/.my.cnf"
+else
+  MY_CNF_FILE="$HOME/.my.cnf" # Default fallback for error messages if none exist
+fi
+
 if ! output=$(madmin status 2>&1); then
-  # Check for .my.cnf
-  if [ ! -f ~/.my.cnf ]; then
+  # Check for config file
+  if [ ! -f "$MY_CNF_FILE" ]; then
     echo "It seems MySQL credentials are missing."
-    echo "Please create a ~/.my.cnf file with the following structure:"
+    echo "Please create a $MY_CNF_FILE file with the following structure:"
     echo ""
     echo "[client]"
     echo "user=your_username"
     echo "password=your_password"
     echo ""
-    echo "Ensure the file permissions are secure: chmod 600 ~/.my.cnf"
+    echo "Ensure the file permissions are secure: chmod 600 $MY_CNF_FILE"
     exit 1
   else
     # Check file permissions: group/other must have no access
-    file_perm=$(stat -c "%a" ~/.my.cnf)
+    file_perm=$(stat -c "%a" "$MY_CNF_FILE")
     if (( 8#$file_perm & 8#077 )); then
-      echo "Error: ~/.my.cnf permissions are $file_perm. Please set them to 600 using 'chmod 600 ~/.my.cnf'."
+      echo "Error: $MY_CNF_FILE permissions are $file_perm. Please set them to 600 using 'chmod 600 $MY_CNF_FILE'."
       exit 1
     fi
     if [[ $output == *"Can't connect"* || $output == *"Connection refused"* ]]; then
       echo "Cannot reach the MySQL server. Is it running? (systemctl status mysql / mariadb)"
     else
-      echo "Credentials found in ~/.my.cnf, but the command still failed."
+      echo "Credentials found in $MY_CNF_FILE, but the command still failed."
       echo "Please verify your credentials or server status."
     fi
     echo "MySQL admin output:"
@@ -147,7 +159,6 @@ if ! output=$(madmin status 2>&1); then
     exit 1
   fi
 fi
-
 # Is the client usable with these credentials? Then it supplies the process list.
 CLI_OK=0
 [[ -n $MYSQL_CLI ]] && mtop "SELECT 1" >/dev/null 2>&1 && CLI_OK=1
